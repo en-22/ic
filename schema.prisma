@@ -31,7 +31,7 @@ model Protocol {
   owner Protocol_owner[]
   title String
   description String?
-  enabled Boolean //algum default?
+  enabled Boolean
 }
 
 model Page {
@@ -59,10 +59,13 @@ model Item_group {
   id Int @id @default(autoincrement())
   createdAt DateTime @default(now())
   updateAt DateTime @updatedAt
+
+  table_columns Table_column[]
   items Item[]
-  type Item_group_type //algum default?
+
+  type Item_group_type
   placement Int
-  isRepeatable Boolean //algum default?
+  isRepeatable Boolean
   page_id Int
   page Page @relation(fields: [page_id], references: [id])
 }
@@ -97,6 +100,18 @@ model Item_option {
   item Item @relation(fields: [item_id], references: [id])
 }
 
+model Table_column {
+  id Int @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  text String
+  placement Int
+
+  group_id Int
+  item_group Item_group @relation(fields: [group_id], references: [id])
+}
+
 enum Page_type {
   ITEMS
   SUBPROTOCOL
@@ -113,4 +128,5 @@ enum Item_type {
   CHECKBOX
   RADIO
   SELECT
+  SCALE
 }
