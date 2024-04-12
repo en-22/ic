@@ -1,37 +1,54 @@
 import { Response, Request } from 'express';
-import { Protocol, ItemType, ItemGroupType, PageType, ItemValidationType, User, Item, UserRole } from '@prisma/client';
+import { Protocol, ItemType, ItemGroupType, PageType, ItemValidationType, User, Item, UserRole, ItemGroup } from '@prisma/client';
 import * as yup from 'yup';
 import prismaClient from '../services/prismaClient';
 import errorFormatter from '../services/errorFormatter';
+import { Console } from 'console';
 
-/*//eu mudei o tablecolumns
+/*//eu mudei o tablecolumns AEH
 - Na criação:
-- //Só permitir admin, coordinator e publisher de criar;
-- //Não permitir que publisher crie protocolos com outros owners além dele (deixar isso só pra coordenador e admin por ora);
-- //Não permitir item dos tipos CHECKBOX, RADIO e SELECT com menos de duas options; Itens que não forem esses três não podem ter options;
-- //Não permitir duas validações do mesmo tipo pro mesmo item (dá pra fazer uma unique key composta no schema);
-- ²Garantir que os placements sejam únicos e sem faltou -> gaps entre eles (esse tem que ver certinho se precisa ser no controller ou dá pra matar com o yup ou direto no banco pra facilitar, vou dar uma olhada tbm e te aviso)
-- Itens do tipo SCALE precisam de pelo menos uma column Itens não SCALE não podem ter columns;
+- ////Só permitir admin, coordinator e publisher de criar;
+- ////Não permitir que publisher crie protocolos com outros owners além dele (deixar isso só pra coordenador e admin por ora);
+- //// Não permitir item dos tipos CHECKBOX, RADIO e SELECT com menos de duas options; Itens que não forem esses três não podem ter options;
+- //// Não permitir duas validações do mesmo tipo pro mesmo item (dá pra fazer uma unique key composta no schema);
+- ////Garantir que os placements sejam únicos e sem faltou -> gaps entre eles (esse tem que ver certinho se precisa ser no controller ou dá pra matar com o yup ou direto no banco pra facilitar, vou dar uma olhada tbm e te aviso)
+- ////Itens do tipo SCALE precisam de pelo menos uma column Itens não SCALE não podem ter columns;
 
 - Na edição:
 - ->Tudo que vale pra criação;
-- //Não permitir que publisher remova a si mesmo dos owners;
+1-
+2-
+3-
+4-
+5-
+6-
+- ////Não permitir que publisher remova a si mesmo dos owners;
 - ?//Não permitir editar objetos não-descendentes do protocolo pai (páginas que pertençam a outro protocolo, groups que pertençam a páginas de outro protocolo, items que pertençam a groups, que pertençam... [esse não precisa fazer a checagem completa, como a gente faz loops aninhados, você sabe que o pai é SEMPRE válido, só precisa checar se o filho realmente pertence àquele pai]);
-- Não permitir editar chave estrangeira referenciando o objeto pai;*/
+- // tirar protocol id e similares Não permitir editar chave estrangeira referenciando o objeto pai;IDK*///so tirar
 
-export const checkAuthorizationToCreate = async (user: User) => {
-    if(user.role === UserRole.USER || user.role === UserRole.APLICATOR){
+export const checkAuthorizationToCreate = async (creator: User) => {
+    const user = await prismaClient.user.findUnique({
+        where: {
+            id: creator.id,
+            role: {
+                not: {
+                    in: [UserRole.USER, UserRole.APLICATOR]
+                }
+            }
+        },
+    });
+    if (!user) {
         throw new Error('This user is not authorized to create a protocol.');
     }
- };
+};
 
  export const checkAuthorizationToUpdateAndDeleteProtocol = async (user: User, protocolId: number) => {
     if(user.role !== UserRole.ADMIN){
         const protocol = await prismaClient.protocol.findUnique({
             where: {
                 id: protocolId,
-                owners: {some: { id: user.id}},
-            },
+                owners: {some: {id: user.id}},
+            }
         });
 
         if (!protocol) {
@@ -40,7 +57,7 @@ export const checkAuthorizationToCreate = async (user: User) => {
     }
  };
 
- export const validateId = async (protocolId: number) => {//pra que serve?
+ export const validateProtocolId = async (protocolId: number) => {
         const protocol = await prismaClient.application.findUnique({
             where: {
                 id: protocolId,
@@ -52,62 +69,18 @@ export const checkAuthorizationToCreate = async (user: User) => {
         }
  };
 
-export const validateItem = async (item: Item) => {
-    const ToBeCreatedItem = await prismaClient.item.findUniqueOrThrow({//melhorar
-        where: {
-            id: item.id,
-        },
-        include: {
-            itemOptions: true,
-        }
-    })
-    if(item.type === ItemType.CHECKBOX || item.type === ItemType.RADIO || item.type === ItemType.SELECT ){
-        if(ToBeCreatedItem.itemOptions.length < 2)
-               throw new Error('Not enough options.');//fazer funçao
-        }else{
-            if(ToBeCreatedItem.itemOptions !== null)//n sei se isso ou maior q 0
-                throw new Error('Options not allowed.');
-    }
-};
-
- async function IsUserTheOnlyOwner(protocolId: number, userId: number) {//É para o publisher
-        const ToBeCreatedProtocol = await prismaClient.protocol.findUnique({
-            where: {
-                id: protocolId,
-                owners: {some: { id: userId}},
-            },
-            include: {
-                owners: true,
-            }
-        })
-
-        if(!ToBeCreatedProtocol || ToBeCreatedProtocol.owners.length > 1)
-            throw new Error('User is not the only owner.');
-    };
-
-export const validateItemValidation = async (itemId: number) => {
-    const item = await prismaClient.item.findUnique({
-        where: {
-            id: itemId,
-        },
-        include: {
-            itemValidations: true,
-        },
-    })
-    const seenType = new Set();
-    let repeatedType = false;
-
-    item?.itemValidations.forEach((ItemValidation) => {
-        if(seenType.has(ItemValidation.type)){
-            repeatedType = true;
-            return;
-        }
-        seenType.add(ItemValidation.type);
-    })
-
-    if(repeatedType)
-        throw new Error('No repeated types allowed.');
-}
+export const validateItem = async (type: ItemType, itemOptionsLength: number, tableColumnsLength: number) => {
+    if((type === ItemType.CHECKBOX || type === ItemType.RADIO || type === ItemType.SELECT)){
+        if(itemOptionsLength < 2)
+            throw new Error('Not enough options.');
+    }else if(type !== ItemType.SCALE){
+        if(itemOptionsLength !== 0 || tableColumnsLength !== 0)
+            throw new Error('Options not allowed.');
+    }else
+        if(tableColumnsLength === 0){
+            console.log('Scale');
+            throw new Error('Scale items must have at least one column.');
+}}
 
 export const createProtocol = async (req: Request, res: Response) => {
     try {
@@ -188,7 +161,7 @@ export const createProtocol = async (req: Request, res: Response) => {
         const createProtocolSchema = yup
             .object()
             .shape({
-                id: yup.number().required(),
+                id: yup.number().min(1),
                 title: yup.string().min(3).max(255).required(),
                 description: yup.string().min(3).max(255).notRequired(),
                 enabled: yup.boolean().required(),
@@ -198,22 +171,29 @@ export const createProtocol = async (req: Request, res: Response) => {
             .noUnknown();
 
         const user = req.user as User;
-
-        //await checkAuthorizationToCreate(user);
-
+        
+        await checkAuthorizationToCreate(user)
+        
         //Yup parsing/validation
         const protocol = await createProtocolSchema.validate(req.body, { stripUnknown: true });
+        
+        //Publisher must create protocol with only himself as owner
+        if(user.role === UserRole.PUBLISHER && protocol.owners.includes(user.id) && protocol.owners.length > 1){
+            throw new Error('Publisher must be the only owner.');
+        }
 
         //Multer files
         const files = req.files as Express.Multer.File[];
 
-        // Prisma transaction
-        //if(user.role === 'PUBLISHER' )
-           // await IsUserTheOnlyOwner(protocol.id, user.id);
+        // Prisma transactions
+
+        const placementSet = new Set<number>(); // Create a set to store encountered placement values       //n pode ser o msm?
+        const seenType = new Set();
 
         const createdProtocol = await prismaClient.$transaction(async (prisma) => {
             const createdProtocol = await prisma.protocol.create({
                 data: {
+                    id: protocol.id,
                     title: protocol.title,
                     description: protocol.description,
                     enabled: protocol.enabled,
@@ -227,11 +207,16 @@ export const createProtocol = async (req: Request, res: Response) => {
 
             // Create nested pages as well as nested itemGroups, items, itemOptions and itemValidations
             for (const [pageId, page] of protocol.pages.entries()) {
+
+                for (const page of protocol.pages) {
+                    if (placementSet.has(page.placement)) {
+                        throw new Error('Duplicate placement value found for pages.');
+                    }
+
+                    placementSet.add(page.placement); // Add the placement to the set
+                }
                 
-                protocol.pages.map((otherPage) => {
-                    if(page.placement === otherPage.placement)
-                        throw new Error('This placement is already in use');
-                });
+                placementSet.clear();
 
                 const createdPage = await prisma.page.create({
                     data: {
@@ -242,10 +227,15 @@ export const createProtocol = async (req: Request, res: Response) => {
                 });
                 for (const [itemGroupId, itemGroup] of page.itemGroups.entries()) {
 
-                    page.itemGroups.map((otherGroup) => {
-                        if(page.placement === otherGroup.placement)
-                            throw new Error('This placement is already in use');
-                    });
+                    for (const itemGroup of page.itemGroups) {
+                        if (placementSet.has(itemGroup.placement)) {
+                            throw new Error('Duplicate placement value found for item Group.');
+                        }
+    
+                        placementSet.add(itemGroup.placement); // Add the placement to the set
+                    }
+                    
+                    placementSet.clear();
 
                     const createdItemGroup = await prisma.itemGroup.create({
                         data: {
@@ -258,10 +248,7 @@ export const createProtocol = async (req: Request, res: Response) => {
 
                     for (const [tableColumnId, tableColumn] of itemGroup.tableColumns.entries()){
 
-                        itemGroup.tableColumns.map((otherColumn) => {
-                            if(tableColumn.placement === otherColumn.placement)
-                                throw new Error('This placement is already in use');
-                        });
+                        //Placement check
 
                         const createdTableColumn = await prisma.tableColumn.create({
                             data: {
@@ -286,10 +273,25 @@ export const createProtocol = async (req: Request, res: Response) => {
 
                     for (const [itemId, item] of itemGroup.items.entries()) {
 
-                        itemGroup.items.map((otherItem) => {
-                            if(item.placement === otherItem.placement)
-                                throw new Error('This placement is already in use');
-                        });
+                        for (const item of itemGroup.items) {
+                            if (placementSet.has(item.placement)) {
+                                throw new Error('Reapeated item placement type not allowed.');
+                            }
+        
+                            placementSet.add(item.placement); // Add the placement to the set
+                        }
+                        
+                        placementSet.clear();
+
+                        //item?.itemValidations.forEach((ItemValidation) => {
+                        //    if (seenType.has(ItemValidation.type)) 
+                        //        throw new Error('No repeated types allowed.');                            
+                        //    seenType.add(ItemValidation.type);
+                        //});
+                    
+                        await validateItem(item.type, item.itemOptions.length, itemGroup.tableColumns.length);
+
+                        //seenType.clear();
 
                         const itemFiles = files
                             .filter((file) => file.fieldname === `pages[${pageId}][itemGroups][${itemGroupId}][items][${itemId}][files]`)
@@ -324,10 +326,15 @@ export const createProtocol = async (req: Request, res: Response) => {
 
                         for (const [itemOptionId, itemOption] of item.itemOptions.entries()) {
 
-                            item.itemOptions.map((otherOption) => {
-                                if(itemOption.placement === otherOption.placement)
-                                    throw new Error('This placement is already in use');
-                            });
+                            for (const itemOption of item.itemOptions) {
+                                if (placementSet.has(itemOption.placement)) {
+                                    throw new Error('Duplicate placement value found for item Option.');
+                                }
+            
+                                placementSet.add(itemOption.placement); // Add the placement to the set
+                            }
+                            
+                            placementSet.clear();
 
                             const itemOptionFiles = files
                                 .filter(
@@ -347,6 +354,16 @@ export const createProtocol = async (req: Request, res: Response) => {
                                     files: {
                                         create: itemOptionFiles,
                                     },
+                                },
+                            });
+                        }
+                        for (const [itemValidationId, itemValidation] of item.itemValidations.entries()) {
+                            const createdItemValidation = await prisma.itemValidation.create({
+                                data: {
+                                    type: itemValidation.type,
+                                    argument: itemValidation.argument,
+                                    customMessage: itemValidation.customMessage,
+                                    itemId: createdItem.id,
                                 },
                             });
                         }
@@ -387,7 +404,7 @@ export const createProtocol = async (req: Request, res: Response) => {
             });
         });
         res.status(201).json({ message: 'Protocol created.', data: createdProtocol });
-    } catch (error: any) {
+     } catch (error: any) {
         res.status(400).json(errorFormatter(error));
     }
 };
@@ -397,7 +414,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
         // ID from params
         const id: number = parseInt(req.params.protocolId);
 
-        await validateId(id);
+        //await validateId(id);
 
         // Yup schemas
 
@@ -471,7 +488,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                 pageId: yup.number(),
                 type: yup.string().oneOf(Object.values(ItemGroupType)),
                 items: yup.array().of(updateItemsSchema).min(1).required(),
-                tableColumns: yup.array().of(UpdatedTableColumnSchema).min(1).required(),
+                tableColumns: yup.array().of(UpdatedTableColumnSchema).default([]),
             })
             .noUnknown();
 
@@ -489,7 +506,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
         const updateProtocolSchema = yup
             .object()
             .shape({
-                id: yup.number().required(),
+                id: yup.number().min(1),
                 title: yup.string().min(3).max(255),
                 description: yup.string().min(3).max(255).notRequired(),
                 enabled: yup.boolean(),
@@ -502,18 +519,18 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
         const protocol = await updateProtocolSchema.validate(req.body, { stripUnknown: true });
 
         const user = req.user as User;
-
-        await checkAuthorizationToUpdateAndDeleteProtocol(user, protocol.id);
-
-        if(user.role === 'PUBLISHER' ){
-            await IsUserTheOnlyOwner(protocol.id, user.id);//eu vou receber o protocol ou quando ele muda?
-            if(!protocol.owners.includes(user.id))
-                throw new Error('This user cannot remove himself from owners.');
+        
+        await checkAuthorizationToUpdateAndDeleteProtocol(user, id);
+        
+        console.log(protocol.owners[0]);
+        console.log(user.id);
+        if(user.role === UserRole.PUBLISHER && !protocol.owners.includes(user.id)){
+            console.log('EU');
+            throw new Error('This user is not authorized to remove themselves from owners.');
         }
 
         //Multer files
         const files = req.files as Express.Multer.File[];
-        
         // Prisma transaction
         const upsertedProtocol = await prismaClient.$transaction(async (prisma) => {
             // Update protocol
@@ -533,6 +550,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                     },
                 },
             });
+
             // Remove pages that are not in the updated protocol
             await prisma.page.deleteMany({
                 where: {
@@ -544,8 +562,9 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
             });
             for (const [pageId, page] of protocol.pages.entries()) {
                 // Update existing pages or create new ones
-                if(page.protocolId !== protocol.id)//é isso?
-                    continue;
+                if(page.protocolId !== protocol.id)
+                    throw new Error('Page does not belong to current protocol.');
+                
                 const upsertedPage = page.id
                     ? await prisma.page.update({
                           where: {
@@ -576,7 +595,8 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                 for (const [itemGroupId, itemGroup] of page.itemGroups.entries()) {
                     // Update existing itemGroups or create new ones
                     if(itemGroup.pageId !== page.id)
-                        continue;
+                        throw new Error('Item Group does not belong to current page.');
+
                     const upsertedItemGroup = itemGroup.id
                         ? await prisma.itemGroup.update({
                               where: {
@@ -609,7 +629,8 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
 
                     for (const [tableColumnId, tableColumn] of itemGroup.tableColumns.entries()){
                         if(tableColumn.groupId !== itemGroup.id)
-                            continue;
+                            throw new Error('Table Column does not belong to current item group.');
+
                         const upsertedTableColumn = tableColumn.id 
                         ? await prisma.tableColumn.update({
                             where: {
@@ -640,8 +661,10 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                         });
 
                         for(const [tableAnswerId, tableAnswer] of tableColumn.answers.entries()){
+                            
                             if(tableAnswer.columnId !== tableColumn.id)
-                                continue;
+                                throw new Error('Table Answer does not belong to current table column.');
+
                             const upsertedTableAnswer = tableAnswer.id
                             ? await prisma.tableAnswer.update({
                                 where: {
@@ -678,7 +701,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                     for (const [itemId, item] of itemGroup.items.entries()) {
                         // Update existing items or create new ones
                         if(item.groupId !== itemGroup.id)
-                            continue;
+                            throw new Error('Item does not belong to current item group.');
 
                         const upsertedItem = item.id
                             ? await prisma.item.update({
@@ -735,7 +758,8 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                         for (const [itemOptionId, itemOption] of item.itemOptions.entries()) {
                             // Update existing itemOptions or create new ones
                             if(itemOption.itemId !== item.id)
-                                continue;
+                                throw new Error('Item Option does not belong to current item.');
+
                             const upsertedItemOption = itemOption.id
                                 ? await prisma.itemOption.update({
                                       where: {
@@ -791,8 +815,9 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
                         for (const [itemValidationId, itemValidation] of item.itemValidations.entries()) {
                             // Update existing itemValidations or create new ones
                             if(itemValidation.itemId !== item.id)
-                                continue;
-                            const upsertedItemValidation = itemValidation.id
+                                throw new Error('Item Validation does not belong to current item.');
+
+                                const upsertedItemValidation = itemValidation.id
                                 ? await prisma.itemValidation.update({
                                       where: {
                                           id: itemValidation.id,
@@ -851,7 +876,7 @@ export const updateProtocol = async (req: Request, res: Response): Promise<void>
         });
         res.status(200).json({ message: 'Protocol updated.', data: upsertedProtocol });
     } catch (error: any) {
-        res.status(400).json({ error: error });
+        res.status(400).json(errorFormatter(error));
     }
 };
 
@@ -888,7 +913,7 @@ export const getAllProtocols = async (req: Request, res: Response): Promise<void
         });
         res.status(200).json({ message: 'All protocols found.', data: protocol });
     } catch (error: any) {
-        res.status(400).json({ error: error });
+        res.status(400).json(errorFormatter(error));
     }
 };
 
@@ -932,7 +957,7 @@ export const getProtocol = async (req: Request, res: Response): Promise<void> =>
 
         res.status(200).json({ message: 'Protocol found.', data: protocol });
     } catch (error: any) {
-        res.status(400).json({ error: error });
+        res.status(400).json(errorFormatter(error));
     }
 };
 
@@ -941,7 +966,7 @@ export const deleteProtocol = async (req: Request, res: Response): Promise<void>
         // ID from params
         const id: number = parseInt(req.params.protocolId);
 
-        await validateId(id);
+        await validateProtocolId(id);
 
         const user = req.user as User;
 
@@ -956,6 +981,6 @@ export const deleteProtocol = async (req: Request, res: Response): Promise<void>
 
         res.status(200).json({ message: 'Protocol deleted.', data: deletedProtocol });
     } catch (error: any) {
-        res.status(400).json({ error: error });
+        res.status(400).json(errorFormatter(error));
     }
 };
